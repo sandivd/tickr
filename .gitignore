@@ -1,0 +1,30 @@
+# Logs & local artifacts
+*.log
+*.tsbuildinfo
+run_logs/
+workspace/
+debug_delta.log
+sub_agents_debug_*.txt
+
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+dist-ssr/
+
+# Local env files (not required by the app — BYOK is stored in the browser)
+.env
+.env.*
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
