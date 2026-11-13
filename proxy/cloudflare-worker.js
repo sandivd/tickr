@@ -87,7 +87,7 @@ const YAHOO_BROWSER_HEADERS = {
   "Referer": "https://finance.yahoo.com/",
 };
 
-async function fetchYahooChartCached(symbol, range, interval) {
+async function fetchYahooChartCached(symbol, range, interval, ttlSeconds = 1800) {
   const yahooUrl = (host) => host + encodeURIComponent(symbol) + `?range=${range}&interval=${interval}`;
   const cacheKey = new Request(yahooUrl(YAHOO_CHART), { method: "GET" });
   let j = null;
@@ -109,7 +109,7 @@ async function fetchYahooChartCached(symbol, range, interval) {
           await caches.default.put(
             cacheKey,
             new Response(JSON.stringify(j), {
-              headers: { "Content-Type": "application/json", "Cache-Control": "public, max-age=1800" },
+              headers: { "Content-Type": "application/json", "Cache-Control": `public, max-age=${ttlSeconds}` },
             })
           );
         } catch {
@@ -219,10 +219,13 @@ export default {
             headers: { ...cors, "Content-Type": "application/json" },
           });
         }
-        const outHeaders = { ...cors, "Content-Type": "application/json", "Cache-Control": "public, max-age=900" };
+        // Tape freshness: the browser re-polls every minute, so it must be
+        // allowed to — a long max-age here makes the tape re-read the same
+        // cached body (up to 45 min stale stacked with the edge cache).
+        const outHeaders = { ...cors, "Content-Type": "application/json", "Cache-Control": "public, max-age=60" };
         const symbol = raw.toUpperCase().replace(/\./g, "-");
         try {
-          const j = await fetchYahooChartCached(symbol, "2y", "1d");
+          const j = await fetchYahooChartCached(symbol, "2y", "1d", 60);
           const r = j?.chart?.result?.[0];
           const ts = r?.timestamp || [];
           const q = r?.indicators?.quote?.[0] || {};

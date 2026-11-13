@@ -51,7 +51,7 @@ export const PRESETS: Record<ProviderId, ProviderPreset> = {
     description: "Claude models with Anthropic's server-side web_search tool. Official CORS access from the browser.",
     kind: "anthropic",
     baseUrl: "https://api.anthropic.com/v1",
-    defaultModel: "claude-sonnet-4-5",
+    defaultModel: "claude-opus-5-5",
     modelsUrl: "https://api.anthropic.com/v1/models",
     authStyle: "x-api-key",
     keySignupUrl: "https://console.anthropic.com/settings/keys",

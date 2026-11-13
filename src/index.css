@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@400..900&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500;1,600;1,700&family=Instrument+Serif:ital,wght@0,400;1,400&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@400..900&family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500;1,600;1,700&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500;1,600;1,700&family=Instrument+Serif:ital,wght@0,400;1,400&display=swap');
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 
@@ -6,7 +6,7 @@
   --font-sans: "Instrument Sans", ui-sans-serif, system-ui, sans-serif;
   --font-serif: "Instrument Serif", Georgia, ui-serif, serif;
   --font-display: "Big Shoulders Display", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
 }
 
 @layer base {
@@ -51,5 +51,138 @@
   }
   .no-print {
     display: none !important;
+  }
+}
+
+/* ── Landing motion ───────────────────────────────────────────────────── */
+/* Registered so the glow position and strength can be animated and inherited. */
+@property --glow-x {
+  syntax: "<length-percentage>";
+  inherits: true;
+  initial-value: 0px;
+}
+@property --glow-y {
+  syntax: "<length-percentage>";
+  inherits: true;
+  initial-value: 0px;
+}
+@property --glow-o {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
+/* Cursor-tracked border glow (driven by initBorderGlow in src/lib/motion.ts). */
+.glow-card {
+  position: relative;
+  isolation: isolate;
+}
+/* Border ring: the gradient only shows where the 1px border sits. */
+.glow-card::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  padding: 1px;
+  border-radius: inherit;
+  pointer-events: none;
+  background: radial-gradient(
+    150px circle at var(--glow-x, 50%) var(--glow-y, 50%),
+    rgb(74 222 128 / 1),
+    rgb(74 222 128 / 0.3) 40%,
+    transparent 75%
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  opacity: var(--glow-o);
+  transition: opacity 300ms ease-out;
+}
+/* Faint interior wash, drawn beneath the card's content. */
+.glow-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+  background: radial-gradient(
+    260px circle at var(--glow-x, 50%) var(--glow-y, 50%),
+    rgb(74 222 128 / 0.07),
+    transparent 70%
+  );
+  opacity: var(--glow-o);
+  transition: opacity 300ms ease-out;
+}
+
+/* Idle patrol: a slow sweep around the border, staggered per card. */
+.glow-roam {
+  --glow-o: 0.4;
+  animation: glow-patrol 12s linear infinite;
+}
+@keyframes glow-patrol {
+  0% {
+    --glow-x: 0%;
+    --glow-y: 0%;
+  }
+  25% {
+    --glow-x: 100%;
+    --glow-y: 0%;
+  }
+  50% {
+    --glow-x: 100%;
+    --glow-y: 100%;
+  }
+  75% {
+    --glow-x: 0%;
+    --glow-y: 100%;
+  }
+  100% {
+    --glow-x: 0%;
+    --glow-y: 0%;
+  }
+}
+
+/* Underlines draw themselves left to right once on load. */
+.tickr-draw {
+  transform-origin: left center;
+  animation: tickr-draw 500ms ease-out both;
+}
+@keyframes tickr-draw {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+/* Terminal caret after the TICKR_ wordmark: a hard, stepped blink. */
+.tickr-blink {
+  animation: tickr-blink 1.2s steps(1, end) infinite;
+}
+@keyframes tickr-blink {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+/* Ticker tape: two identical copies, so translating by -50% loops seamlessly. */
+.tickr-tape-track {
+  display: flex;
+  width: max-content;
+  animation: tickr-tape 48s linear infinite;
+}
+.tickr-tape:hover .tickr-tape-track {
+  animation-play-state: paused;
+}
+@keyframes tickr-tape {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
   }
 }

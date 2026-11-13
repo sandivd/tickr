@@ -64,12 +64,12 @@ export function HistoryDrawer({ open, entries, onClose, onOpenEntry, onRerunEntr
       <div
         role="dialog"
         aria-label="Report history"
-        className="w-full max-w-md h-full bg-stone-900 border-l border-white/10 shadow-2xl flex flex-col"
+        className="w-full max-w-md h-full bg-[#0d1210] border-l border-green-500/15 shadow-2xl flex flex-col"
       >
-        <div className="flex items-center justify-between p-4 border-b border-stone-800">
+        <div className="flex items-center justify-between p-4 border-b border-green-500/15">
           <div className="flex items-center gap-2">
-            <HistoryIcon className="w-5 h-5 text-white" />
-            <h2 className="text-white font-bold tracking-tight">Report history</h2>
+            <HistoryIcon className="w-5 h-5 text-green-400" />
+            <h2 className="font-mono font-medium tracking-wide text-stone-100"><span className="text-green-400 mr-2">&gt;</span>Report history</h2>
             <span className="text-[11px] text-stone-500 font-mono">{entries.length}/30</span>
           </div>
           <div className="flex items-center gap-1">
@@ -86,7 +86,7 @@ export function HistoryDrawer({ open, entries, onClose, onOpenEntry, onRerunEntr
                 <Trash2 className="w-3.5 h-3.5" /> Clear all
               </button>
             )}
-            <button onClick={onClose} className="text-stone-400 hover:text-white p-1">
+            <button onClick={onClose} className="text-stone-500 hover:text-stone-200 p-1">
               <X className="w-5 h-5" />
             </button>
           </div>
@@ -108,8 +108,8 @@ export function HistoryDrawer({ open, entries, onClose, onOpenEntry, onRerunEntr
               return (
                 <div key={g.ticker}>
                   <div className="flex items-center justify-between mb-2">
-                    <span className="font-display font-bold text-lg uppercase tracking-wider text-white">
-                      {g.ticker}
+                    <span className="font-mono text-lg uppercase tracking-wider text-stone-100">
+                      <span className="text-green-400 mr-2">&gt;</span>{g.ticker}
                     </span>
                     <span className="text-[11px] text-stone-500 font-mono">
                       {g.items.length} report{g.items.length === 1 ? "" : "s"}
@@ -123,9 +123,9 @@ export function HistoryDrawer({ open, entries, onClose, onOpenEntry, onRerunEntr
                           <Line
                             type="monotone"
                             dataKey="conviction"
-                            stroke="#7dd3fc"
+                            stroke="#4ade80"
                             strokeWidth={2}
-                            dot={{ r: 2.5, fill: "#7dd3fc", strokeWidth: 0 }}
+                            dot={{ r: 2.5, fill: "#4ade80", strokeWidth: 0 }}
                             isAnimationActive={false}
                           />
                         </LineChart>
@@ -134,7 +134,7 @@ export function HistoryDrawer({ open, entries, onClose, onOpenEntry, onRerunEntr
                   )}
                   <div className="space-y-2">
                     {g.items.map((e) => (
-                      <div key={e.id} className="bg-stone-800/60 border border-stone-700/60 rounded-lg p-3">
+                      <div key={e.id} className="bg-black/30 border border-green-500/15 rounded-lg p-3">
                         <div className="flex items-start gap-2">
                           <span
                             className={`text-xs font-mono font-bold px-2 py-0.5 rounded shrink-0 ${scoreColor(e.conviction)}`}
@@ -156,13 +156,13 @@ export function HistoryDrawer({ open, entries, onClose, onOpenEntry, onRerunEntr
                         <div className="flex items-center gap-1 mt-2">
                           <button
                             onClick={() => onOpenEntry(e)}
-                            className="text-[11px] text-stone-300 hover:text-white border border-stone-700 hover:border-stone-500 rounded px-2 py-1 flex items-center gap-1 transition-colors"
+                            className="text-[11px] text-green-300/70 hover:text-green-200 border border-green-500/25 hover:border-green-500/40 bg-green-500/[0.04] rounded px-2 py-1 flex items-center gap-1 transition-colors"
                           >
                             <FileText className="w-3 h-3" /> Open
                           </button>
                           <button
                             onClick={() => onRerunEntry(e)}
-                            className="text-[11px] text-stone-300 hover:text-white border border-stone-700 hover:border-stone-500 rounded px-2 py-1 flex items-center gap-1 transition-colors"
+                            className="text-[11px] text-green-300/70 hover:text-green-200 border border-green-500/25 hover:border-green-500/40 bg-green-500/[0.04] rounded px-2 py-1 flex items-center gap-1 transition-colors"
                             title="Run a fresh analysis for this ticker"
                           >
                             <RefreshCw className="w-3 h-3" /> Re-run
@@ -184,7 +184,7 @@ export function HistoryDrawer({ open, entries, onClose, onOpenEntry, onRerunEntr
           )}
         </div>
 
-        <div className="p-3 border-t border-stone-800 text-[10px] text-stone-600 leading-relaxed">
+        <div className="p-3 border-t border-green-500/15 text-[10px] text-stone-600 leading-relaxed">
           Stored only in this browser's localStorage. The full report JSON is kept so an archived analysis can be
           reopened exactly as it was produced.
         </div>

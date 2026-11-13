@@ -141,3 +141,63 @@ export function formatTavilyResults(query: string, results: TavilyResult[], lean
   if (results.length === 0) lines.push("No results found.");
   return lines.join("\n");
 }
+
+export interface TavilyExtract {
+  url: string;
+  rawContent: string;
+}
+
+/**
+ * Tavily Extract — full page text for specific URLs. The search endpoint
+ * only returns short snippets, which truncate exactly where earnings
+ * press-release income-statement tables live (bullet highlights first,
+ * tables after) — so quarterly net income in dollars frequently never
+ * reaches the model. Extract closes that gap for the few pages that matter.
+ *
+ * 1 credit per call (up to 5 URLs); callers gate it hard (quarterly-figure
+ * queries only, primary-looking results only, a few calls per run) so the
+ * free tier is unaffected in practice. Unextractable URLs come back in
+ * `failed_results` rather than failing the request — they are filtered out
+ * here, and the caller treats a total failure as best-effort skip.
+ */
+export async function extractTavily(
+  apiKey: string,
+  urls: string[],
+  signal?: AbortSignal
+): Promise<TavilyExtract[]> {
+  const timeoutSignal = typeof AbortSignal.timeout === "function" ? AbortSignal.timeout(TAVILY_TIMEOUT_MS) : undefined;
+  recordTavilyCredits(1);
+  let resp: Response;
+  try {
+    resp = await resilientFetch("https://api.tavily.com/extract", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        urls,
+        extract_depth: "basic",
+        format: "text",
+      }),
+      signal: composeAbort(signal, timeoutSignal),
+    }, "Tavily extract");
+  } catch (e) {
+    if ((e as { name?: string })?.name === "TimeoutError") {
+      throw new Error(`Tavily extract timed out after ${TAVILY_TIMEOUT_MS / 1000}s — network issue or Tavily outage.`);
+    }
+    throw e;
+  }
+
+  if (!resp.ok) {
+    const errorText = await resp.text().catch(() => "");
+    throw new Error(`Tavily extract failed (${resp.status}): ${errorText.slice(0, 200)}`);
+  }
+
+  const data = (await resp.json()) as {
+    results?: Array<{ url: string; raw_content?: string | null }>;
+  };
+  return (data.results || [])
+    .filter((r) => r.url && r.raw_content)
+    .map((r) => ({ url: r.url, rawContent: r.raw_content as string }));
+}

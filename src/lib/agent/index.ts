@@ -22,7 +22,12 @@ export async function* runAgentEventStream(opts: {
   tavilyKey?: string;
   ticker: string;
   instruction?: string;
-  /** Tool-round budget (4–16, default 16); ≤8 puts the run in lean mode. */
+  /**
+   * Tool-round budget (4–16, default 16); ≤8 puts the run in lean mode.
+   * Enforced as a hard cap on every provider: OpenAI-compatible endpoints
+   * stop issuing tool calls after N rounds; Anthropic/Gemini stop after N
+   * server-side searches and force synthesis from the gathered context.
+   */
   roundBudget?: number;
   signal: AbortSignal;
 }): AsyncGenerator<AgentEvent> {
@@ -40,10 +45,10 @@ export async function* runAgentEventStream(opts: {
         yield* runOpenAICompatible(preset, provider, systemText, userText, tavilyKey, ticker, signal, rounds);
         return;
       case "anthropic":
-        yield* runAnthropic(preset, provider, systemText, userText, tavilyKey, signal);
+        yield* runAnthropic(preset, provider, systemText, userText, tavilyKey, signal, rounds);
         return;
       case "gemini":
-        yield* runGemini(preset, provider, systemText, userText, tavilyKey, signal);
+        yield* runGemini(preset, provider, systemText, userText, tavilyKey, signal, rounds);
         return;
     }
   } catch (e: unknown) {

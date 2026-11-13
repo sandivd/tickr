@@ -130,21 +130,22 @@ export function SettingsModal({ open, settings, firstRun, onClose, onSave }: Pro
   };
 
   // Reuse the models fetch result for "Test" only; Load models is implicit on test success.
-  const btn = "px-3 py-2 rounded-lg text-sm font-medium transition-colors";
+  const btn = "px-3 py-2 rounded-md font-mono text-sm transition-colors";
   const inputClass =
-    "w-full bg-stone-800 border border-stone-700 rounded-lg px-3 py-2 text-sm text-white font-mono outline-none focus:border-stone-500 focus:ring-1 focus:ring-stone-500 placeholder-stone-600";
+    "w-full bg-black/40 border border-green-500/20 rounded-md px-3 py-2 text-sm text-stone-100 font-mono outline-none focus:border-green-500/60 focus:ring-1 focus:ring-green-500/40 placeholder-stone-600";
 
   return (
     <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="w-full max-w-lg bg-stone-900 border border-stone-700 rounded-xl shadow-2xl max-h-[92vh] overflow-y-auto no-scrollbar">
-        <div className="flex items-center justify-between p-5 border-b border-stone-800">
+      <div className="w-full max-w-lg bg-[#0d1210]/95 backdrop-blur-md border border-green-500/25 rounded-xl shadow-2xl max-h-[92vh] overflow-y-auto no-scrollbar">
+        <div className="flex items-center justify-between p-5 border-b border-green-500/15">
           <div className="flex items-center gap-2">
-            <KeyRound className="w-5 h-5 text-white" />
-            <h2 className="text-white font-bold text-lg tracking-tight">
+            <KeyRound className="w-5 h-5 text-green-400" />
+            <h2 className="font-mono font-medium text-base tracking-wide text-stone-100">
+              <span className="text-green-400 mr-2">&gt;</span>
               {firstRun ? "Connect your AI provider" : "AI Provider Settings"}
             </h2>
           </div>
-          <button onClick={onClose} className="text-stone-400 hover:text-white p-1">
+          <button onClick={onClose} className="text-stone-500 hover:text-stone-200 p-1">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -162,7 +163,7 @@ export function SettingsModal({ open, settings, firstRun, onClose, onSave }: Pro
             <select
               value={pid}
               onChange={(e) => setProvider(e.target.value as ProviderId)}
-              className={`${inputClass} font-sans`}
+              className={inputClass}
             >
               {PROVIDER_ORDER.map((id) => (
                 <option key={id} value={id}>
@@ -173,7 +174,7 @@ export function SettingsModal({ open, settings, firstRun, onClose, onSave }: Pro
             <p className="text-xs text-stone-500 mt-2">{preset.description}</p>
             {preset.browserAccess && (
               <p className={`text-xs mt-2 leading-relaxed ${
-                preset.browserAccess.tone === "warn" ? "text-yellow-500/90" : "text-green-600"
+                preset.browserAccess.tone === "warn" ? "text-yellow-500/90" : "text-green-400/90"
               }`}>
                 {preset.browserAccess.text}
               </p>
@@ -189,13 +190,13 @@ export function SettingsModal({ open, settings, firstRun, onClose, onSave }: Pro
           {/* API key */}
           <div>
             <div className="flex items-center justify-between mb-2">
-              <label className="text-xs font-bold text-stone-500 uppercase tracking-wider">API Key</label>
+              <label className="font-mono text-xs text-green-400/80 uppercase tracking-wider">API Key</label>
               {preset.keySignupUrl && (
                 <a
                   href={preset.keySignupUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1"
+                  className="text-xs text-green-400 hover:text-green-300 flex items-center gap-1"
                 >
                   Get a key <ExternalLink className="w-3 h-3" />
                 </a>
@@ -213,7 +214,7 @@ export function SettingsModal({ open, settings, firstRun, onClose, onSave }: Pro
               />
               <button
                 onClick={() => setShowKey((s) => ({ ...s, [pid]: !s[pid] }))}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-stone-500 hover:text-white p-1"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-stone-500 hover:text-stone-200 p-1"
                 type="button"
               >
                 {showKey[pid] ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
@@ -265,7 +266,9 @@ export function SettingsModal({ open, settings, firstRun, onClose, onSave }: Pro
               {pid === "openrouter" && (
                 <p className="text-[11px] text-stone-500 mt-1">
                   Free accounts: stay on <span className="text-stone-300">openrouter/free</span> or pick a model ending
-                  in <span className="text-stone-300">:free</span> — paid model IDs fail with 402 on a $0 balance.
+                  in <span className="text-stone-300">:free</span> — paid model IDs fail with 402 on a $0 balance. Free
+                  non-grounded models are the weakest path for chart-accurate financials — grounded Gemini or a paid
+                  model is markedly better.
                 </p>
               )}
             </div>
@@ -279,10 +282,10 @@ export function SettingsModal({ open, settings, firstRun, onClose, onSave }: Pro
                   type="checkbox"
                   checked={!!pcfg?.webPluginOn}
                   onChange={(e) => setProviderFlag("webPluginOn", e.target.checked)}
-                  className="mt-0.5 h-4 w-4 accent-white shrink-0"
+                  className="mt-0.5 h-4 w-4 accent-green-500 shrink-0"
                 />
                 <span className="block">
-                  <span className="block text-xs font-bold text-stone-300 uppercase tracking-wider">
+                  <span className="block font-mono text-xs text-green-400/80 uppercase tracking-wider">
                     OpenRouter native web-search plugin — off by default
                   </span>
                   <span className="block text-[11px] text-stone-500 mt-1 leading-relaxed">{preset.webPluginNote}</span>
@@ -295,7 +298,7 @@ export function SettingsModal({ open, settings, firstRun, onClose, onSave }: Pro
           <div>
             <label
               htmlFor="tickr-round-budget"
-              className="block text-xs font-bold text-stone-500 uppercase tracking-wider mb-2"
+              className="block font-mono text-xs text-green-400/80 uppercase tracking-wider mb-2"
             >
               Agent tool budget — {draft.agentRoundBudget ?? 16} {(draft.agentRoundBudget ?? 16) === 1 ? "round" : "rounds"}
               {(draft.agentRoundBudget ?? 16) <= 8 ? " (lean)" : ""}
@@ -308,13 +311,14 @@ export function SettingsModal({ open, settings, firstRun, onClose, onSave }: Pro
               step={1}
               value={draft.agentRoundBudget ?? 16}
               onChange={(e) => setDraft((d) => ({ ...d, agentRoundBudget: Number(e.target.value) }))}
-              className="w-full accent-white"
+              className="w-full accent-green-500"
             />
             <p className="text-[11px] text-stone-500 mt-1 leading-relaxed">
               One round = one model turn plus its searches. 16 = the full document sweep (~10 filings). Free-tier
               models commonly take 10–20 min per run at 16 — at ≤8 the run goes <span className="text-stone-300">lean</span>:
               ~6 filings, slimmer search payloads, faster final report. The app-injected price/market data is exact
-              either way.
+              either way. Enforcement: OpenAI-compatible endpoints stop tool-calling at the cap; Anthropic/Gemini stop
+              after that many server-side searches, then synthesize the report from gathered context.
             </p>
           </div>
 
@@ -350,7 +354,7 @@ export function SettingsModal({ open, settings, firstRun, onClose, onSave }: Pro
 
           {/* Test + save */}
           <div className="flex items-center gap-3">
-            <button onClick={runTest} disabled={testState === "testing"} className={`${btn} border border-stone-700 text-stone-200 hover:border-stone-500 disabled:opacity-50`}>
+            <button onClick={runTest} disabled={testState === "testing"} className={`${btn} border border-green-500/30 text-green-300/80 hover:border-green-500/50 hover:text-green-200 disabled:opacity-50`}>
               {testState === "testing" ? "Testing..." : "Test connection"}
             </button>
             {testState === "ok" && <CheckCircle2 className="w-4 h-4 text-green-500" />}
@@ -363,7 +367,7 @@ export function SettingsModal({ open, settings, firstRun, onClose, onSave }: Pro
             </p>
           )}
 
-          <div className="flex items-center justify-between pt-2 border-t border-stone-800">
+          <div className="flex items-center justify-between pt-2 border-t border-green-500/15">
             <button
               onClick={() => {
                 if (window.confirm("Delete all stored keys and settings from this browser?")) {
@@ -376,13 +380,13 @@ export function SettingsModal({ open, settings, firstRun, onClose, onSave }: Pro
               <Trash2 className="w-3.5 h-3.5" /> Clear stored data
             </button>
             <div className="flex items-center gap-2">
-              <button onClick={onClose} className={`${btn} text-stone-400 hover:text-white`}>
+              <button onClick={onClose} className={`${btn} text-stone-500 hover:text-stone-200`}>
                 {firstRun ? "Skip for now" : "Cancel"}
               </button>
               <button
                 onClick={() => onSave(draft)}
                 disabled={!pcfg?.apiKey}
-                className={`${btn} bg-white text-black hover:bg-stone-200 disabled:bg-stone-700 disabled:text-stone-500 disabled:cursor-not-allowed`}
+                className={`${btn} border border-green-500/50 text-green-300 hover:bg-green-500/10 disabled:border-green-500/15 disabled:text-stone-600 disabled:bg-transparent disabled:cursor-not-allowed`}
               >
                 Save & start analyzing
               </button>

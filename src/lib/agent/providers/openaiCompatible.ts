@@ -11,7 +11,7 @@
  */
 
 import type { AgentEvent, ProviderPreset, ProviderConfig } from "../types";
-import { tavilyOpenAITool, TAVILY_TOOL_NAME, searchTavily, formatTavilyResults, type TavilySearchOptions } from "../tavily";
+import { tavilyOpenAITool, TAVILY_TOOL_NAME, searchTavily, extractTavily, formatTavilyResults, type TavilyResult, type TavilySearchOptions } from "../tavily";
 import { fetchMonthlyCloses, fetchMarketSnapshot } from "../marketData";
 import { LEAN_ROUND_BUDGET } from "../prompt";
 import { resilientFetch, isAbort, composeAbort, StreamWatchdog, STREAM_IDLE_MS } from "../net";
@@ -35,6 +35,34 @@ interface PendingToolCall {
   id: string;
   name: string;
   arguments: string;
+}
+
+/**
+ * Quarterly figures (especially net income in DOLLARS) live in the
+ * income-statement TABLES of earnings press releases — the exact content
+ * search snippets truncate (highlights/bullets first, tables after; seen in
+ * the wild: Q4/Q2 FY2026 SMCI releases stating only EPS + full-year totals
+ * in their snippets). When a quarterly-figure search surfaces a PRIMARY
+ * page — the canonical "… Announces … Financial Results" title (rule 13's
+ * pattern) or a wire-service copy — extract its full text so the model can
+ * read the table instead of deriving or omitting.
+ */
+const EXTRACT_WIRE_HOSTS = /(^|\.)(businesswire\.com|prnewswire\.com|globenewswire\.com)$/i;
+
+function isExtractablePrimary(r: TavilyResult): boolean {
+  try {
+    const u = new URL(r.url);
+    if (/sec\.gov$/i.test(u.hostname)) return false; // filings flow through the document path
+    if (/\/quote\//i.test(u.pathname)) return false; // quote/history shells carry no article body
+    if (EXTRACT_WIRE_HOSTS.test(u.hostname)) return true;
+    return /\bannounc/i.test(r.title);
+  } catch {
+    return false; // unparsable URL — skip
+  }
+}
+
+function looksLikeQuarterlyFigureQuery(query: string): boolean {
+  return /net\s*income|revenue|earnings|quarterly|fiscal/i.test(query);
 }
 
 export async function* runOpenAICompatible(
@@ -77,6 +105,42 @@ export async function* runOpenAICompatible(
 
   let callCounter = 0;
   let tavilyFailStreak = 0;
+  // Page-extract budget: full-text reads of the top primary result(s) for
+  // quarterly-figure searches (see isExtractablePrimary above). Capped per
+  // run — each call costs 1 Tavily credit and ~2K tokens of context — and
+  // deduped by URL so recurring press-release copies are read once.
+  const extractedUrls = new Set<string>();
+  let extractCallsLeft = 3;
+
+  /**
+   * Best-effort page-extract for quarterly-figure searches — shared by the
+   * preamble floor and the model's tool rounds. Returns the text block to
+   * append to the search result ("" when gated out or nothing extracted).
+   * Rethrows AbortError so a user stop still ends the run; every other
+   * failure is swallowed — the snippets the search already returned stand.
+   */
+  const maybeExtract = async (key: string, query: string, results: TavilyResult[]): Promise<string> => {
+    if (extractCallsLeft <= 0 || !looksLikeQuarterlyFigureQuery(query)) return "";
+    const targets = results
+      .filter((r) => isExtractablePrimary(r) && !extractedUrls.has(r.url))
+      .slice(0, 2)
+      .map((r) => r.url);
+    if (targets.length === 0) return "";
+    extractCallsLeft -= 1;
+    try {
+      const extracts = await extractTavily(key, targets, signal);
+      let appended = "";
+      for (const ex of extracts) {
+        if (!ex.rawContent || extractedUrls.has(ex.url)) continue;
+        extractedUrls.add(ex.url);
+        appended += `\n\n--- FULL TEXT EXTRACT (fetched by the app; primary source — read its tables) ---\nURL: ${ex.url}\n${ex.rawContent.slice(0, 6000)}\n--- END EXTRACT ---`;
+      }
+      return appended;
+    } catch (e: any) {
+      if (e?.name === "AbortError") throw e;
+      return ""; // extract is best-effort; never breaks the search it rode on
+    }
+  };
 
   // ---- Preamble: authoritative chart data + guaranteed fresh search floor --
   // 1) Month-end closes: the "past four months" price chart is a
@@ -104,13 +168,27 @@ export async function* runOpenAICompatible(
     yield { type: "tool_call", name: "price_history", arguments: { ticker }, callId: priceCallId };
     const history = await fetchMonthlyCloses(ticker, signal);
     if (history) {
-      const lines = history.closes.slice(-4).map((c) => {
+      // The chart shows the 4 most recent COMPLETED months: the relay's last
+      // entry is the current, unfinished month — its price is the latest
+      // trading day's close, not a month-end — so it must stay out of
+      // stock_price_4m. The market snapshot below separately carries that
+      // freshest close for current-price statements in the text.
+      const completedCloses = history.closes.slice(0, -1);
+      const lines = completedCloses.slice(-4).map((c) => {
         const [y, m] = c.month.split("-").map(Number);
         return `- ${PREAMBLE_MONTHS[(m || 1) - 1]} '${String(y % 100).padStart(2, "0")}: $${Number(c.price.toFixed(2))}`;
       });
-      const lastMonth = history.closes[history.closes.length - 1]?.month || "";
+      const lastCompleted = completedCloses[completedCloses.length - 1];
+      // stock_price_as_of describes the chart's newest point, so it anchors to
+      // the newest completed month-end (calendar month-end is fine for the
+      // freshness chip; the snapshot keeps the exact latest session date).
+      let monthEndIso = "";
+      if (lastCompleted) {
+        const [y, m] = lastCompleted.month.split("-").map(Number);
+        monthEndIso = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+      }
       blocks.push(
-        `AUTHORITATIVE month-end closing prices for ${ticker} — fetched by the app directly from Yahoo Finance. For stock_price_4m, use EXACTLY these closes (transcribe, never estimate; ${lastMonth} is the current month and its price is the most recent trading day's close on ${history.asOf}):\n${lines.join("\n")}\nSet financial_charts.stock_price_as_of to "${history.asOf}".`
+        `AUTHORITATIVE month-end closing prices for ${ticker} — fetched by the app directly from Yahoo Finance. For stock_price_4m, use EXACTLY these closes for the ${lines.length} most recent COMPLETED months (transcribe, never estimate; the current unfinished month must NOT appear in the chart — its latest close arrives separately in the market snapshot):\n${lines.join("\n")}\nSet financial_charts.stock_price_as_of to "${monthEndIso}" (month-end of the newest month listed).`
       );
       yield { type: "tool_result", name: "price_history", result: lines.join("\n"), callId: priceCallId };
     } else {
@@ -158,8 +236,10 @@ export async function* runOpenAICompatible(
         `. When the report mentions the current/latest share price, YTD performance, ` +
         `52-week high/low positioning, or moving-average comparisons, use EXACTLY these figures ` +
         `(rounding for presentation is fine) — do not substitute article quotes, do not compute ` +
-        `YTD from an assumed year-start price, and do not "estimate" equivalents. Set ` +
-        `stock_price_as_of to "${snap.asOf}"`;
+        `YTD from an assumed year-start price, and do not "estimate" equivalents. These are ` +
+        `current-level figures for narrative statements only — they are NOT month-end closes and ` +
+        `must NOT be added to financial_charts.stock_price_4m (the chart's stock_price_as_of is ` +
+        `set by the price-history block above)`;
       blocks.push(snapText);
       yield { type: "tool_result", name: "market_snapshot", result: snapText, callId: snapCallId };
       yield { type: "market_snapshot", data: snap };
@@ -196,7 +276,11 @@ export async function* runOpenAICompatible(
         // Lean runs trim results per search to shrink the final-turn context.
         const leanOptions = lean ? { ...options, max_results: Math.min(options.max_results ?? 6, 4) } : options;
         const results = await searchTavily(tavilyKey, query, signal, leanOptions);
-        const formatted = formatTavilyResults(query, results, lean);
+        let formatted = formatTavilyResults(query, results, lean);
+        // The guaranteed fresh-data floor: when this search surfaced a
+        // primary quarterly-results page, read its full text before the
+        // model even starts (shared budget/dedupe with tool-round extracts).
+        formatted += await maybeExtract(tavilyKey, query, results);
         blocks.push(formatted);
         yield { type: "tool_result", name: TAVILY_TOOL_NAME, result: formatted, callId };
       } catch (e: any) {
@@ -433,7 +517,8 @@ export async function* runOpenAICompatible(
                 const time_range = ["day", "week", "month", "year"].includes(argRange)
                   ? (argRange as TavilySearchOptions["time_range"])
                   : undefined;
-                const results = await searchTavily(tavilyKey, String(args.query ?? ""), signal, {
+                const query = String(args.query ?? "");
+                const results = await searchTavily(tavilyKey, query, signal, {
                   topic,
                   time_range,
                   // Slim payload in lean mode: fewer, tighter snippets keep
@@ -441,7 +526,12 @@ export async function* runOpenAICompatible(
                   max_results: lean ? 4 : 6,
                   include_published_date: true,
                 });
-                resultText = formatTavilyResults(String(args.query ?? ""), results, lean);
+                resultText = formatTavilyResults(query, results, lean);
+                // Read the page we already found (see maybeExtract): quarterly
+                // dollar figures live in press-release income-statement tables,
+                // which search snippets truncate. AbortError propagates to the
+                // catch below; extract failures are swallowed inside the helper.
+                resultText += await maybeExtract(tavilyKey, query, results);
                 tavilyFailStreak = 0;
               } catch (e: any) {
                 if (e?.name === "AbortError") return;

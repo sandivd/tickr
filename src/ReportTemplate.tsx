@@ -167,10 +167,20 @@ function SnapshotStrip({ snapshot }: { snapshot: MarketSnapshot }) {
  */
 function ValuationSanity({ data }: { data: ReportData }) {
   const perf = data.financial_charts?.financial_performance_4q || [];
+  // Strict guard on purpose: ANY distributions key (even null) hides this
+  // card — P/S is meaningless for funds, and a spurious stock-mode card on
+  // an unverified ETF report is worse than a hidden one. (The main chart's
+  // isEtfPerf treats null as "no evidence" because a subtitle flip there is
+  // a user-facing bug; here hiding is the conservative failure mode.)
   if (perf.length > 0 && perf[0].distributions !== undefined) return null; // ETF
   const ttmRevenue = perf.reduce((s, q) => s + (Number.isFinite(q.revenue) ? Number(q.revenue) : 0), 0);
   const ttmNet = perf.reduce((s, q) => s + (Number.isFinite(q.net_income) ? Number(q.net_income) : 0), 0);
-  const netMargin = ttmRevenue > 0 ? (ttmNet / ttmRevenue) * 100 : null;
+  // A TTM margin mixing a partial net-income sum with the full revenue sum
+  // is unsound (the two sides would cover different quarter sets) — compute
+  // it only when the chart states all four quarters of both figures.
+  const marginReady =
+    perf.length === 4 && perf.every((q) => Number.isFinite(q.revenue) && Number.isFinite(q.net_income));
+  const netMargin = marginReady && ttmRevenue > 0 ? (ttmNet / ttmRevenue) * 100 : null;
   const mcap = typeof data.valuation?.market_cap_b === 'number' ? data.valuation.market_cap_b : null;
   const fwd =
     typeof data.valuation?.forward_revenue_guidance_b === 'number'
@@ -217,7 +227,7 @@ function ValuationSanity({ data }: { data: ReportData }) {
             netMargin !== null ? (
               <span className={netMargin >= 0 ? '' : 'text-red-600'}>{netMargin.toFixed(1)}%</span>
             ) : (
-              <Not alt="Quarterly chart missing" />
+              <Not alt={perf.length === 4 ? 'Net income unverified for some quarters' : 'Quarterly chart missing'} />
             )
           }
           sub="TTM net income ÷ TTM revenue"
@@ -258,6 +268,24 @@ export default function ReportTemplate({ data, ticker, onClose, durationSecs = 0
   const charts = data.financial_charts;
   const priceAgeDays = daysSince(charts?.stock_price_as_of);
   const finAgeDays = daysSince(charts?.financials_as_of);
+  const perf = charts?.financial_performance_4q || [];
+  // A quarter object may carry explicit nulls (older prompts encouraged
+  // emitting all four keys) — null !== undefined, so a null distributions
+  // field previously flipped the whole chart into ETF mode. Treat null as
+  // missing.
+  const isEtfPerf = perf.length > 0 && perf[0].distributions != null;
+  // Honest-gap annotations: quarters this run could not verify, plus a
+  // short array when the model had to drop unconfirmable quarters entirely.
+  const unverifiedQuarters = perf
+    .filter((q) => q.revenue == null && q.net_income == null && q.distributions == null)
+    .map((q) => q.quarter);
+  const partialCoverage = perf.length > 0 && perf.length < 4;
+  // Stock-mode quarters where revenue was verified but net income was not:
+  // the NI bar is simply absent, which otherwise reads as "≈0" instead of
+  // "revenue verified, net income unverified".
+  const missingNetIncome = !isEtfPerf
+    ? perf.filter((q) => q.revenue != null && q.net_income == null).map((q) => q.quarter)
+    : [];
   
   return (
     <div className="min-h-full bg-[#F6F4F0] text-stone-900 font-sans w-full flex flex-col h-full overflow-y-auto print-full">
@@ -369,7 +397,7 @@ export default function ReportTemplate({ data, ticker, onClose, durationSecs = 0
                         <AnalysisCard
               title="Financial Performance"
               subtext={
-                (data.financial_charts.financial_performance_4q && data.financial_charts.financial_performance_4q.length > 0 && data.financial_charts.financial_performance_4q[0].distributions !== undefined ? "This chart shows the quarterly distributions (dividends/yield per share) for the past four completed quarters." : "This chart shows the revenue and net income for the past four completed quarters.")
+                (isEtfPerf ? "This chart shows the quarterly distributions (dividends/yield per share) for the past four completed quarters." : "This chart shows the revenue and net income for the past four completed quarters.")
                 + (data.financial_charts.financial_performance_4q && data.financial_charts.financial_performance_4q.length > 0 ? ` Newest quarter: ${data.financial_charts.financial_performance_4q[data.financial_charts.financial_performance_4q.length - 1].quarter}.` : "")
               }
               flag={finAgeDays !== null && finAgeDays > 240 ? "Stale data — the newest quarter shown ended more than ~8 months ago. More recent results may now exist." : undefined}
@@ -379,13 +407,13 @@ export default function ReportTemplate({ data, ticker, onClose, durationSecs = 0
                   <BarChart data={data.financial_charts.financial_performance_4q ? [...data.financial_charts.financial_performance_4q] : []}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e5e4" />
                     <XAxis dataKey="quarter" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#78716c' }} dy={10} />
-                    <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#78716c' }} dx={-10} tickFormatter={(value) => data.financial_charts?.financial_performance_4q?.[0]?.distributions !== undefined ? `$${value}` : `${value}B`} />
+                    <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#78716c' }} dx={-10} tickFormatter={(value) => isEtfPerf ? `$${value}` : `${value}B`} />
                     <RechartsTooltip 
                       contentStyle={{ borderRadius: '8px', border: '1px solid #e5e5e4', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
                       formatter={(value: number, name: string) => name === 'Distributions' ? [`$${value}`, name] : [`$${value}B`, name]}
                     />
                     <Legend iconType="circle" wrapperStyle={{ fontSize: '12px', paddingTop: '20px' }} />
-                    {data.financial_charts.financial_performance_4q && data.financial_charts.financial_performance_4q.length > 0 && data.financial_charts.financial_performance_4q[0].distributions !== undefined ? (
+                    {isEtfPerf ? (
                       <Bar dataKey="distributions" name="Distributions" fill="#10b981" radius={[4, 4, 0, 0]} barSize={48} />
                     ) : (
                       <>
@@ -396,6 +424,13 @@ export default function ReportTemplate({ data, ticker, onClose, durationSecs = 0
                   </BarChart>
                 </ResponsiveContainer>
               </div>
+              {(partialCoverage || unverifiedQuarters.length > 0 || missingNetIncome.length > 0) && (
+                <p className="text-xs text-stone-500 mt-2">
+                  {partialCoverage ? `Only ${perf.length} of the last 4 completed quarters could be verified this run. ` : ""}
+                  {unverifiedQuarters.length > 0 ? `No source stated figures for: ${unverifiedQuarters.join(", ")} — shown as empty, never estimated. ` : ""}
+                  {missingNetIncome.length > 0 ? `Net income not stated for: ${missingNetIncome.join(", ")} — shown as empty, never estimated.` : ""}
+                </p>
+              )}
             </AnalysisCard>
             <ValuationSanity data={data} />
           </div>

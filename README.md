@@ -23,7 +23,9 @@ Everything runs **entirely in your browser** — there's no backend and no accou
 | **Google (Gemini)** | Native `google_search` grounding |
 | **Custom** (any OpenAI-compatible endpoint: Groq, LM Studio, vLLM, your own gateway...) | Via optional Tavily fallback |
 
-[Tavily](https://tavily.com) is the default search channel for OpenRouter, OpenCode and custom gateways — add a free-tier `tvly-...` key in Settings and every model gains grounded search. OpenRouter's native web plugin stays **off by default**: OpenRouter bills it per search (~$0.007, even on free models) straight to your credits, and a $0-balance account that goes negative freezes entirely. It's a consent checkbox in Settings for those who want it. For a strict-$0 run: `openrouter/free` (or any `:free` model) + your own Tavily key.
+[Tavily](https://tavily.com) is the default search channel for OpenRouter, OpenCode and custom gateways — add a free-tier `tvly-...` key in Settings and every model gains grounded search. For quarterly-figure searches TICKR additionally extracts the full text of the top press-release-style result (max 3 reads per run, 1 credit each) so income-statement tables — not just truncated snippets — reach the model. OpenRouter's native web plugin stays **off by default**: OpenRouter bills it per search (~$0.007, even on free models) straight to your credits, and a $0-balance account that goes negative freezes entirely. It's a consent checkbox in Settings for those who want it. For a strict-$0 run: `openrouter/free` (or any `:free` model) + your own Tavily key.
+
+> **Chart-accuracy tip:** financial charts are only as reliable as the model's data path. Grounded Gemini (native `google_search`) or a paid OpenRouter model transcribe quarterly figures far more accurately than free non-grounded models — TICKR's honesty rules make the latter *omit* figures it can't verify (shown as empty slots) rather than serve wrong numbers, so a weaker model may show fewer bars.
 
 ## Run locally
 
@@ -98,3 +100,11 @@ Each provider adapter normalizes its streaming API into a common event stream (`
 | `npm run build` | Production bundle in `dist/` |
 | `npm run preview` | Preview the built bundle |
 | `npm run lint` | TypeScript type checking (`tsc --noEmit`) |
+
+## Credits
+
+- Landing/agent backdrop (auto-rotating every 20 seconds): darkened for use as the app background.
+  - [Wall Street — New York Stock Exchange](https://commons.wikimedia.org/wiki/File:Wall_Street_-_New_York_Stock_Exchange.jpg) by **Carlos Delgado**, [CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0)
+  - [Börse Frankfurt stock exchange (Luminale 2014)](https://commons.wikimedia.org/wiki/File:B%C3%B6rse_Frankfurt_stock_exchange_-_Germany_-_Luminale_2014_-_April_3rd_2014_-_02.jpg) by **Norbert Nagel**, [CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0)
+  - [Canary Wharf from Limehouse](https://commons.wikimedia.org/wiki/File:Canary_Wharf_from_Limehouse_London_June_2016_HDR.jpg) by **King of Hearts**, [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0)
+  - `trading_room_recreation_4k.jpg`, `wall_street_recreation_4k.jpg`, `charging_bull_recreation_4k.jpg`: locally supplied recreations — note their source/license here if any third-party rights apply.

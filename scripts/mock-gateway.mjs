@@ -14,6 +14,14 @@
  *   - POST /v1/chat/completions  → SSE: reasoning deltas (`delta.reasoning`),
  *     content deltas ending in a ```json CHART fixture, then a final chunk
  *     with finish_reason "stop" + usage.total_tokens, then `data: [DONE]`
+ *   - POST /anthropic/v1/messages → Anthropic Messages SSE (message_start /
+ *     content_block_* deltas) for e2e-testing runAnthropic's tool-budget
+ *     enforcement: phase 1 narrates + runs SIX web_search cycles (the adapter
+ *     must cut at budget+1 attempts), the follow-up tool-less synthesis
+ *     request streams the report fixture
+ *   - POST /v1beta/models/*:streamGenerateContent → Gemini SSE
+ *     (candidates/groundingMetadata) for runGemini's budget enforcement,
+ *     same runaway-then-synthesize pattern
  *   - CORS: echoes the request Origin so browser tab runs preflight cleanly
  *
  * The fixture report has verdict/deep_insights/looks-like-report keys, so
@@ -101,7 +109,8 @@ function corsHeaders(req, extra = {}) {
   return {
     ...(origin ? { "Access-Control-Allow-Origin": origin, Vary: "Origin" } : {}),
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Authorization, Content-Type, HTTP-Referer, X-Title",
+    "Access-Control-Allow-Headers":
+      "Authorization, Content-Type, HTTP-Referer, X-Title, x-api-key, anthropic-version, anthropic-dangerous-direct-browser-access",
     "Access-Control-Max-Age": "86400",
     ...extra,
   };
@@ -157,6 +166,15 @@ async function streamChatCompletion(req, res, body) {
 
   if (!forced) {
     res.write(sseLine(chunk({ reasoning: reasoningPieces[0] })));
+    // HEAVY=1: real reasoning models stream their thinking in many small
+    // deltas — emit ~40 per round so the app's per-delta timeline handling
+    // (one card per delta unless merged) is exercised at realistic volume.
+    if (process.env.HEAVY === "1") {
+      for (let d = 0; d < 40; d++) {
+        res.write(sseLine(chunk({ reasoning: `d${d} thinking fragment ` })));
+        await sleep(5);
+      }
+    }
     res.write(
       sseLine(
         chunk({
@@ -167,7 +185,12 @@ async function streamChatCompletion(req, res, body) {
               type: "function",
               function: {
                 name: "tavily_search",
-                arguments: '{"query":"RKLB recent SEC filings 10-K 10-Q mock"}',
+                // First model round exercises the quarterly-figure path
+                // (page-extract gating); later rounds keep the filings loop.
+                arguments:
+                  messages.length <= 3
+                    ? '{"query":"RKLB latest quarterly results revenue net income earnings press release"}'
+                    : '{"query":"RKLB recent SEC filings 10-K 10-Q mock"}',
               },
             },
           ],
@@ -190,10 +213,27 @@ async function streamChatCompletion(req, res, body) {
     "\n```\n\nReport complete.",
   ].join("");
 
+  // HEAVY=1: profiling mode for memory/lag measurement sessions. Pads the
+  // synthesis with filler prose on both sides of the fenced report so the
+  // app's per-chunk extraction runs against a realistically large, growing
+  // stream (~150 KB total, ~40 s of streaming): filler *before* the fence
+  // exercises the partial-JSON parse-and-throw phase, filler *after* it
+  // exercises the re-parse + re-render storm once the report is detectable.
+  // Default behavior (no env var) is unchanged.
+  const streamText =
+    process.env.HEAVY === "1"
+      ? "Scanning gathered context. " +
+        "filler ".repeat(6000) +
+        "\n\n" +
+        finalText +
+        "\n" +
+        "post ".repeat(22000)
+      : finalText;
+
   // Stream text in small deltas to exercise the incremental renderer.
   const SIZE = 48;
-  for (let i = 0; i < finalText.length; i += SIZE) {
-    res.write(sseLine(chunk({ content: finalText.slice(i, i + SIZE) })));
+  for (let i = 0; i < streamText.length; i += SIZE) {
+    res.write(sseLine(chunk({ content: streamText.slice(i, i + SIZE) })));
     await sleep(12);
   }
 
@@ -313,9 +353,199 @@ const server = createServer(async (req, res) => {
     return;
   }
 
+  if (req.method === "POST" && url.pathname === "/anthropic/v1/messages") {
+    if (!req.headers["x-api-key"]) {
+      res.writeHead(401, { ...corsHeaders(req), "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: { message: "Missing x-api-key (mock gateway)" } }));
+      return;
+    }
+    let raw = "";
+    for await (const part of req) raw += part;
+    let parsedBody = {};
+    try { parsedBody = JSON.parse(raw || "{}"); } catch { parsedBody = {}; }
+    await streamAnthropicMessages(req, res, parsedBody);
+    return;
+  }
+
+  if (
+    req.method === "POST" &&
+    url.pathname.startsWith("/v1beta/models/") &&
+    url.pathname.includes(":streamGenerateContent")
+  ) {
+    let raw = "";
+    for await (const part of req) raw += part;
+    let parsedBody = {};
+    try { parsedBody = JSON.parse(raw || "{}"); } catch { parsedBody = {}; }
+    await streamGemini(req, res, parsedBody);
+    return;
+  }
+
   res.writeHead(404, { ...corsHeaders(req), "Content-Type": "text/plain" });
-  res.end("Mock gateway: unknown route (use /v1/models, /v1/prices, /v1/market or /v1/chat/completions)");
+  res.end("Mock gateway: unknown route (use /v1/models, /v1/prices, /v1/market, /v1/chat/completions, /anthropic/v1/messages or /v1beta/models/*:streamGenerateContent)");
 });
+
+// ---------------------------------------------------------------------------
+// Anthropic Messages API dialect (POST /anthropic/v1/messages) — exercises the
+// runAnthropic adapter's tool-budget enforcement locally. Phase 1 narrates +
+// runs SIX web_search cycles (the adapter must cut at budget+1 attempts and
+// never see the tail); the follow-up tool-less synthesis request (detected by
+// the forced-synthesis note) streams the report fixture.
+// ---------------------------------------------------------------------------
+
+const noop = () => {};
+
+async function streamAnthropicMessages(req, res, body) {
+  const tools = Array.isArray(body?.tools) ? body.tools : [];
+  const isSynthesis =
+    typeof body?.messages?.[0]?.content === "string" && /TOOL BUDGET REACHED/.test(body.messages[0].content);
+  console.log(
+    `[mock-gateway] anthropic messages: synthesis=${isSynthesis} ` +
+      `tools=${tools.length ? `web_search(max_uses=${tools[0]?.max_uses})` : "none"} ` +
+      `msgs=${body?.messages?.length}`
+  );
+
+  req.on("error", noop);
+  res.on("error", noop);
+  res.writeHead(200, {
+    ...corsHeaders(req),
+    "Content-Type": "text/event-stream; charset=utf-8",
+    "Cache-Control": "no-cache",
+    Connection: "keep-alive",
+  });
+  // Client cuts the connection at the budget (reader.cancel) — drop writes.
+  const write = (obj) => {
+    if (!res.destroyed) res.write(`data: ${JSON.stringify(obj)}\n\n`);
+  };
+
+  if (isSynthesis) {
+    write({ type: "message_start", message: { usage: { input_tokens: 200 } } });
+    write({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } });
+    const finalText =
+      "Synthesized from the interrupted transcript (mock fixture — no real documents were consulted).\n\n```json\n" +
+      JSON.stringify(REPORT, null, 2) +
+      "\n```";
+    for (let i = 0; i < finalText.length; i += 48) {
+      write({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: finalText.slice(i, i + 48) } });
+      await sleep(10);
+    }
+    write({ type: "content_block_stop", index: 0 });
+    write({ type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 300 } });
+    res.end();
+    return;
+  }
+
+  // Phase 1: input 100 tokens, narration, then SIX search cycles — with the
+  // e2e budget of 4 the adapter must cut at attempt #5, so output_tokens
+  // (sent only at the very end) never reach it.
+  write({ type: "message_start", message: { usage: { input_tokens: 100 } } });
+  write({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } });
+  const intro = "Starting the mock analysis of the requested ticker. I will interleave narration with web searches.";
+  for (let i = 0; i < intro.length; i += 40) {
+    write({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: intro.slice(i, i + 40) } });
+    await sleep(8);
+  }
+  for (let k = 1; k <= 6; k++) {
+    write({
+      type: "content_block_start",
+      index: k * 2 - 1,
+      content_block: { type: "server_tool_use", id: `srvtoolu_${k}`, name: "web_search", input: { query: `mock search query ${k}` } },
+    });
+    await sleep(25);
+    // HEAVY=1: pad the result title to ~84 KB so the app's tool_result
+    // timeline details carry realistically huge payloads (profiling mode for
+    // the detail-truncation path; default unchanged).
+    const resultTitle =
+      process.env.HEAVY === "1"
+        ? `TRUNCATION-MARKER-${k} ` + "filler ".repeat(12000)
+        : `Mock result ${k}`;
+    write({
+      type: "content_block_start",
+      index: k * 2,
+      content_block: {
+        type: "web_search_tool_result",
+        tool_use_id: `srvtoolu_${k}`,
+        content: [{ type: "web_search_result", url: `https://example.com/mock/result-${k}`, title: resultTitle }],
+      },
+    });
+    await sleep(25);
+    write({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: ` Search ${k} done. ` } });
+    await sleep(10);
+  }
+  // Never seen by the adapter when the budget is < 6:
+  write({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: " (mock runaway tail — must have been cut)" } });
+  write({ type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 50 } });
+  res.end();
+}
+
+// ---------------------------------------------------------------------------
+// Gemini streamGenerateContent dialect (POST /v1beta/models/*:streamGenerate…
+// with alt=sse) — exercises runGemini's client-side budget enforcement: phase
+// 1 grounds SIX distinct queries (adapter must cut at budget+1), the follow-up
+// tool-less synthesis request streams the report fixture.
+// ---------------------------------------------------------------------------
+
+async function streamGemini(req, res, body) {
+  const isSynthesis =
+    typeof body?.contents?.[0]?.parts?.[0]?.text === "string" &&
+    /TOOL BUDGET REACHED/.test(body.contents[0].parts[0].text);
+  const hasSearchTool = Array.isArray(body?.tools) && body.tools.some((t) => t?.googleSearch);
+  console.log(
+    `[mock-gateway] gemini streamGenerateContent: synthesis=${isSynthesis} ` +
+      `googleSearch=${hasSearchTool} contents=${body?.contents?.length}`
+  );
+
+  req.on("error", noop);
+  res.on("error", noop);
+  res.writeHead(200, {
+    ...corsHeaders(req),
+    "Content-Type": "text/event-stream; charset=utf-8",
+    "Cache-Control": "no-cache",
+    Connection: "keep-alive",
+  });
+  const write = (obj) => {
+    if (!res.destroyed) res.write(`data: ${JSON.stringify(obj)}\n\n`);
+  };
+  const payload = (parts, grounding, usage) =>
+    write({
+      candidates: [{ content: { parts }, ...(grounding ? { groundingMetadata: grounding } : {}) }],
+      ...(usage ? { usageMetadata: { totalTokenCount: usage } } : {}),
+    });
+
+  if (isSynthesis) {
+    const finalText =
+      "Synthesized from the interrupted transcript (mock fixture — no real documents were consulted).\n\n```json\n" +
+      JSON.stringify(REPORT, null, 2) +
+      "\n```";
+    for (let i = 0; i < finalText.length; i += 48) {
+      payload([{ text: finalText.slice(i, i + 48) }], null, null);
+      await sleep(10);
+    }
+    payload([{ text: " Report complete." }], null, 400);
+    res.end();
+    return;
+  }
+
+  // Phase 1: narration + SIX grounding cycles, then a runaway tail the
+  // adapter must never read when the budget is < 6.
+  const intro = "Starting the mock analysis. I will ground every step with google_search.";
+  for (let i = 0; i < intro.length; i += 40) {
+    payload([{ text: intro.slice(i, i + 40) }], null, null);
+    await sleep(8);
+  }
+  for (let k = 1; k <= 6; k++) {
+    payload(
+      [{ text: ` Search ${k} narrated. ` }],
+      {
+        webSearchQueries: [`mock gemini query ${k}`],
+        groundingChunks: [{ web: { uri: `https://example.com/mock/gem-${k}`, title: `Mock Gemini source ${k}` } }],
+      },
+      null
+    );
+    await sleep(30);
+  }
+  payload([{ text: " (mock runaway tail — must have been cut)" }], null, 150);
+  res.end();
+}
 
 server.listen(PORT, () => {
   console.log(`[mock-gateway] http://localhost:${PORT}/v1 — any Bearer key accepted`);
